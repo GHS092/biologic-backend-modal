@@ -288,12 +288,16 @@ async def invoke_gemini(
             result = await gemini_core.generate_embedding(payload.get("text"))
 
         elif action == "findRelevantSessions":
-            result = await gemini_core.find_relevant_sessions(
+            relevant, random_session = await gemini_core.find_relevant_sessions(
                 payload.get("currentTopic"), 
                 payload.get("sessions"), 
                 payload.get("topK", 3), 
                 payload.get("currentMode")
             )
+            result = {
+                "relevant": relevant,
+                "random": random_session
+            }
 
         elif action == "runTribunal":
             result = await gemini_core.run_tribunal(
