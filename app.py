@@ -67,6 +67,14 @@ app = modal.App("biologic-backend")
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install_from_requirements("requirements.txt")
+    .add_local_dir(
+        os.path.join(os.path.dirname(__file__), "api_routes"),
+        remote_path="/root/api_routes"
+    )
+    .add_local_dir(
+        os.path.join(os.path.dirname(__file__), "api_utils"),
+        remote_path="/root/api_utils"
+    )
 )
 
 # Export the entire FastAPI app as a serverless ASGI application
