@@ -9,7 +9,7 @@ async def search_radiopaedia(query: str) -> Dict[str, Any]:
     print(f"[Radiopaedia API] Buscando casos para: {query}...")
     
     # Access token obtenido vía OAuth 2.0 (Authorization Code flow)
-    ACCESS_TOKEN = '52d7365e98496c7142b92dc2746d794dd30c1898d8df147c619d84f2a63d2a53'
+    ACCESS_TOKEN = 'cd81cd9bba11cebcc5cfa97ba3f5f03a04a0722a3328283661f785e5cf273db0'
     
     try:
         encoded_query = urllib.parse.quote(query)
