@@ -1398,6 +1398,8 @@ async def run_clinical_analysis(
         corrected_differential_diagnoses = None
         corrected_workup = None
         corrected_treatment = None
+        corrected_intervention_priority = None
+        corrected_syndromes = None
 
         # Step 4: Red Team Debate Loop
         if is_debate_mode:
@@ -1434,8 +1436,9 @@ async def run_clinical_analysis(
                     "6. Sub-regla de Falsación Científica y Anclaje (Anti-Sesgo): Audita si el adscrito asumió un diagnóstico tumoral/grave por mera frecuencia o ubicación (sesgo de anclaje) ignorando la falta de prerrequisitos físicos (ej: diagnosticar una neoplasia sólida activa en una lesión puramente líquida que tiene 0.0% de realce de contraste y señal idéntica al agua/líquido de anclaje). Si detectas esta contradicción física, VETA de inmediato el diagnóstico y reordena los diferenciales para colocar la variante benigna, dilatación o quiste simple al tope absoluto.\n"
                     "7. Sub-regla de Coherencia de Multiplicidad y Parsimonia (Ockham): Critica si el adscrito diagnosticó múltiples neoplasias independientes raras en un paciente asintomático, en lugar de unificar todo bajo una única variante anatómica benigna común y sistémica (como quistes o dilataciones benignas múltiples).\n"
                     "8. Sub-regla de la Zona de Incertidumbre y Proceso Dual: Audita si el adscrito incurrió en cierre prematuro (Sistema 1) sin realizar el Double Check analítico del Sistema 2, o si omitió declarar un hallazgo limítrofe o indeterminado como tal e indicar de forma proactiva el Gold Standard de validación idóneo.\n"
-                    "9. Sub-regla de Invasión de Planos y Consistencia 3D: Audita si el adscrito omitió evaluar rigurosamente los planos de grasa de clivaje, borramiento de márgenes o envolvimiento de estructuras vasculares y nerviosas como marcador tridimensional de agresividad o benignidad.\n\n"
-                    "Si encuentras fallas, VETA los diagnósticos erróneos y re-formula la jerarquía diagnóstica (correctedDifferentialDiagnoses), plan (correctedWorkup) y tratamiento (correctedTreatment).\n"
+                    "9. Sub-regla de Invasión de Planos y Consistencia 3D: Audita si el adscrito omitió evaluar rigurosamente los planos de grasa de clivaje, borramiento de márgenes o envolvimiento de estructuras vasculares y nerviosas como marcador tridimensional de agresividad o benignidad.\n"
+                    "10. Sub-regla de Coherencia Terapéutica Post-Refutación: Si tu auditoría anula o degrada el diagnóstico inicial en favor de una variante benigna, quística o no quirúrgica (ej: de Schwannoma a Meningocele o Quiste de Tarlov), estás OBLIGADO a actualizar también la Prioridad de Intervención (correctedInterventionPriority) y la Agrupación Sindromática (correctedSyndromes) para que recomienden un manejo clínico conservador de vigilancia activa. Queda estrictamente prohibido sugerir cirugías, biopsias invasivas o Acción Cero de alta morbilidad para diagnósticos que catalogues como benignos y no quirúrgicos.\n\n"
+                    "Si encuentras fallas, VETA los diagnósticos erróneos y re-formula la jerarquía diagnóstica (correctedDifferentialDiagnoses), plan (correctedWorkup), tratamiento (correctedTreatment), la prioridad de intervención (correctedInterventionPriority) y los síndromes (correctedSyndromes).\n"
                     "Responde en ESPAÑOL en formato JSON."
                 )
                 debate_parts.append({"text": debate_prompt})
@@ -1518,7 +1521,20 @@ async def run_clinical_analysis(
                                         "pathophysiologicalConnection": {"type": "STRING"}
                                     }
                                 },
-                                "correctedSummary": {"type": "STRING"}
+                                "correctedSummary": {"type": "STRING"},
+                                "correctedSyndromes": {
+                                    "type": "ARRAY",
+                                    "items": {"type": "STRING"}
+                                },
+                                "correctedInterventionPriority": {
+                                    "type": "OBJECT",
+                                    "properties": {
+                                        "actionZero": {"type": "STRING"},
+                                        "rationale": {"type": "STRING"},
+                                        "urgency": {"type": "STRING", "enum": ["inmediata", "alta", "moderada"]}
+                                    },
+                                    "required": ["actionZero", "rationale", "urgency"]
+                                }
                             },
                             "required": ["evaluations", "boardSummary", "redTeamAudit"]
                         }
@@ -1541,6 +1557,8 @@ async def run_clinical_analysis(
                 corrected_differential_diagnoses = debate_data.get("correctedDifferentialDiagnoses")
                 corrected_workup = debate_data.get("correctedWorkup")
                 corrected_treatment = debate_data.get("correctedTreatment")
+                corrected_intervention_priority = debate_data.get("correctedInterventionPriority")
+                corrected_syndromes = debate_data.get("correctedSyndromes")
 
                 if debate_data.get("correctedSystemicIntegration"):
                     parsed_data["systemicIntegration"] = debate_data["correctedSystemicIntegration"]
