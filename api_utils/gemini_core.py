@@ -1437,7 +1437,7 @@ async def run_clinical_analysis(
                     "7. Sub-regla de Coherencia de Multiplicidad y Parsimonia (Ockham): Critica si el adscrito diagnosticó múltiples neoplasias independientes raras en un paciente asintomático, en lugar de unificar todo bajo una única variante anatómica benigna común y sistémica (como quistes o dilataciones benignas múltiples).\n"
                     "8. Sub-regla de la Zona de Incertidumbre y Proceso Dual: Audita si el adscrito incurrió en cierre prematuro (Sistema 1) sin realizar el Double Check analítico del Sistema 2, o si omitió declarar un hallazgo limítrofe o indeterminado como tal e indicar de forma proactiva el Gold Standard de validación idóneo.\n"
                     "9. Sub-regla de Invasión de Planos y Consistencia 3D: Audita si el adscrito omitió evaluar rigurosamente los planos de grasa de clivaje, borramiento de márgenes o envolvimiento de estructuras vasculares y nerviosas como marcador tridimensional de agresividad o benignidad.\n"
-                    "10. Sub-regla de Coherencia Terapéutica Post-Refutación: Si tu auditoría anula o degrada el diagnóstico inicial en favor de una variante benigna, quística o no quirúrgica (ej: de Schwannoma a Meningocele o Quiste de Tarlov), estás OBLIGADO a actualizar también la Prioridad de Intervención (correctedInterventionPriority) y la Agrupación Sindromática (correctedSyndromes) para que recomienden un manejo clínico conservador de vigilancia activa. Queda estrictamente prohibido sugerir cirugías, biopsias invasivas o Acción Cero de alta morbilidad para diagnósticos que catalogues como benignos y no quirúrgicos.\n\n"
+                    "10. Sub-regla de Coherencia Terapéutica Post-Refutación (Vacuna contra el Arrastre / Leakage Vaccine): Si tu auditoría anula o degrada el diagnóstico inicial en favor de una variante benigna, quística o no quirúrgica (ej: de Schwannoma a Meningocele o Quiste de Tarlov), estás OBLIGADO a actualizar también la Prioridad de Intervención (correctedInterventionPriority) y la Agrupación Sindromática (correctedSyndromes) para que recomienden un manejo clínico conservador de vigilancia activa. 🛡️ VACUNA CONTRA EL ARRASTRE DE CONTEXTO: Tienes estrictamente prohibido copiar, heredar o arrastrar la urgencia o la acción del reporte del médico de primer nivel si has vetado su diagnóstico. Si has clasificado la lesión como de manejo conservador o variante benigna asintomática, estás obligado a reescribir de raíz correctedInterventionPriority, forzando la urgencia a 'moderada' o 'baja' y la Acción Cero a 'Vigilancia clínica neurológica y/o resonancia de control'. Cualquier contradicción donde recomiendes cirugía en Acción Cero pero digas que es benigna no quirúrgica en el tratamiento será penalizada como un fallo crítico de lógica médica.\n\n"
                     "Si encuentras fallas, VETA los diagnósticos erróneos y re-formula la jerarquía diagnóstica (correctedDifferentialDiagnoses), plan (correctedWorkup), tratamiento (correctedTreatment), la prioridad de intervención (correctedInterventionPriority) y los síndromes (correctedSyndromes).\n"
                     "Responde en ESPAÑOL en formato JSON."
                 )
@@ -1560,10 +1560,33 @@ async def run_clinical_analysis(
                 corrected_intervention_priority = debate_data.get("correctedInterventionPriority")
                 corrected_syndromes = debate_data.get("correctedSyndromes")
 
+                # 🛡️ CAPA DE VALIDACIÓN METACOGNITIVA (JUEZ DE LA JUNTA):
+                # Erradicar cualquier discrepancia residual de urgencia si la junta médica determinó que el manejo es conservador.
+                if corrected_intervention_priority and isinstance(corrected_intervention_priority, dict):
+                    urgency_val = str(corrected_intervention_priority.get("urgency", "")).lower()
+                    action_val = str(corrected_intervention_priority.get("actionZero", "")).lower()
+                    
+                    consenso_val = str(board_summary).lower() if board_summary else ""
+                    treatment_val = ""
+                    if corrected_treatment and isinstance(corrected_treatment, list):
+                        treatment_val = " ".join([str(t.get("rationale", "")).lower() + " " + " ".join([str(i).lower() for i in t.get("interventions", [])]) for t in corrected_treatment])
+                    
+                    # Si el consenso de la junta o las fases de tratamiento sugieren vigilancia/conservador/observación
+                    if any(kw in consenso_val or kw in treatment_val for kw in ["vigilancia", "observación", "observacion", "no quirúrgic", "no quirurgic", "conservador"]):
+                        if urgency_val in ["inmediata", "alta"] or any(kw in action_val for kw in ["urgente", "quirúrgic", "quirurgic", "descompresió", "descompresio", "resección", "reseccion"]):
+                            print("[Juez de la Junta] Detectada discrepancia de urgencia residual en Acción Cero. Corrigiendo...")
+                            corrected_intervention_priority["urgency"] = "moderada"
+                            corrected_intervention_priority["actionZero"] = "Vigilancia clínica neurológica y resonancia magnética de seguimiento"
+                            corrected_intervention_priority["rationale"] = (
+                                "La Junta Médica determinó la naturaleza benigna e incidental de la lesión (meningocele/quiste), "
+                                "por lo que se descarta la descompresión urgente y se opta por observación y control evolutivo conservador."
+                            )
+
                 if debate_data.get("correctedSystemicIntegration"):
                     parsed_data["systemicIntegration"] = debate_data["correctedSystemicIntegration"]
                 if debate_data.get("correctedSummary"):
                     parsed_data["summary"] = debate_data["correctedSummary"]
+
 
                 on_step_update({
                     "id": "clin-debate-done",
