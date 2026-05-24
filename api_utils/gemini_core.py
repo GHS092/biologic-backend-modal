@@ -1198,6 +1198,10 @@ async def run_clinical_analysis(
                 "  p) REGLA DE TRAZABILIDAD DOCUMENTAL ESTRICTA: no inventes PMIDs. Pon \"Ausencia de correlación en literatura proporcionada\" si no concuerda.\n"
                 "  q) REGLA DE AGNOSIA FORZADA (Desacoplamiento Percepción-Diagnóstico): estrictamente prohibido usar palabras patológicas (\"pus\", \"necrosis\", \"tumor\") mientras describes los píxeles en el Paso 3. Describe morfología pura.\n"
                 "  r) REGLA DE CALIBRACIÓN ÓPTICA Y REFUTACIÓN DE FORMA: compara la señal del centro contra tejido sano de anclaje. Reporta neutro (\"Gris claro\", \"Negro profundo\") en todas las secuencias antes de emitir juicio.\n"
+                "\n"
+                "PASO 4 (Jerarquización por Significancia Clínica): Clasifica todos y cada uno de los hallazgos descritos en 'clinicalSignificanceGrouping'. Agrúpalos estrictamente en: 'criticalFindings' (compromiso vital inmediato), 'relevantIncidentalFindings' (hallazgos incidentales que aclaran o descartan el caso pero no son emergencias), y 'nonSignificantFindings' (variantes anatómicas comunes, quistes microscópicos estables o variantes normales). Evita a toda costa el sobrediagnóstico.\n"
+                "PASO 5 (Memoria Comparativa y Cinética Espacio-Temporal): Revisa la base de conocimiento y el historial médico provisto. Si detectas estudios previos que detallen mediciones anteriores de la misma anomalía, calcula el Delta de Crecimiento Espacio-Temporal (growthDeltaPercent) y el intervalo en meses (timeSpanMonths). Si el delta es menor o igual al 5.0% (estabilidad biológica espacio-temporal), rebaja drásticamente la sospecha de neoplasia agresiva en favor de una variante benigna o quística estable, y justifícalo en 'stabilityRationale'. Si no hay estudios previos, clasifica el cálculo como 'indeterminado'.\n"
+                "PASO 6 (Explicabilidad Médica Avanzada - XAI): Para cada diagnóstico en 'differentialDiagnoses', debes proveer un párrafo detallado en 'differentialExclusion' justificando científicamente por qué esa condición fue excluida como diagnóstico principal o por qué se catalogó con menor probabilidad, detallando los signos físicos/fisiológicos ausentes o incompatibles.\n"
             )
 
         if past_context:
@@ -1302,9 +1306,10 @@ async def run_clinical_analysis(
                                 "properties": {
                                     "condition": {"type": "STRING"},
                                     "probability": {"type": "STRING", "enum": ["alta", "media", "baja"]},
-                                    "rationale": {"type": "STRING"}
+                                    "rationale": {"type": "STRING"},
+                                    "differentialExclusion": {"type": "STRING"}
                                 },
-                                "required": ["condition", "probability", "rationale"]
+                                "required": ["condition", "probability", "rationale", "differentialExclusion"]
                             }
                         },
                         "redFlags": {
@@ -1374,9 +1379,30 @@ async def run_clinical_analysis(
                                 "required": ["phase", "interventions", "rationale"]
                             }
                         },
-                        "summary": {"type": "STRING"}
+                        "summary": {"type": "STRING"},
+                        "clinicalSignificanceGrouping": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "criticalFindings": {"type": "ARRAY", "items": {"type": "STRING"}},
+                                "relevantIncidentalFindings": {"type": "ARRAY", "items": {"type": "STRING"}},
+                                "nonSignificantFindings": {"type": "ARRAY", "items": {"type": "STRING"}}
+                            },
+                            "required": ["criticalFindings", "relevantIncidentalFindings", "nonSignificantFindings"]
+                        },
+                        "temporalComparison": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "growthDeltaPercent": {"type": "NUMBER"},
+                                "timeSpanMonths": {"type": "NUMBER"},
+                                "previousMeasurement": {"type": "STRING"},
+                                "currentMeasurement": {"type": "STRING"},
+                                "stabilityAssessment": {"type": "STRING", "enum": ["estable", "progresion_lenta", "progresion_rapida", "indeterminada"]},
+                                "stabilityRationale": {"type": "STRING"}
+                            },
+                            "required": ["stabilityAssessment", "stabilityRationale"]
+                        }
                     },
-                    "required": ["patientProfile", "differentialDiagnoses", "redFlags", "workup", "treatment", "summary"]
+                    "required": ["patientProfile", "differentialDiagnoses", "redFlags", "workup", "treatment", "summary", "clinicalSignificanceGrouping", "temporalComparison"]
                 }
                 return await ai.aio.models.generate_content(
                     model=get_active_model(),
@@ -1400,6 +1426,8 @@ async def run_clinical_analysis(
         corrected_treatment = None
         corrected_intervention_priority = None
         corrected_syndromes = None
+        corrected_clinical_significance_grouping = None
+        corrected_temporal_comparison = None
 
         # Step 4: Red Team Debate Loop
         if is_debate_mode:
@@ -1438,7 +1466,7 @@ async def run_clinical_analysis(
                     "8. Sub-regla de la Zona de Incertidumbre y Proceso Dual: Audita si el adscrito incurrió en cierre prematuro (Sistema 1) sin realizar el Double Check analítico del Sistema 2, o si omitió declarar un hallazgo limítrofe o indeterminado como tal e indicar de forma proactiva el Gold Standard de validación idóneo.\n"
                     "9. Sub-regla de Invasión de Planos y Consistencia 3D: Audita si el adscrito omitió evaluar rigurosamente los planos de grasa de clivaje, borramiento de márgenes o envolvimiento de estructuras vasculares y nerviosas como marcador tridimensional de agresividad o benignidad.\n"
                     "10. Sub-regla de Coherencia Terapéutica Post-Refutación (Vacuna contra el Arrastre / Leakage Vaccine): Si tu auditoría anula o degrada el diagnóstico inicial en favor de una variante benigna, quística o no quirúrgica (ej: de Schwannoma a Meningocele o Quiste de Tarlov), estás OBLIGADO a actualizar también la Prioridad de Intervención (correctedInterventionPriority) y la Agrupación Sindromática (correctedSyndromes) para que recomienden un manejo clínico conservador de vigilancia activa. 🛡️ VACUNA CONTRA EL ARRASTRE DE CONTEXTO: Tienes estrictamente prohibido copiar, heredar o arrastrar la urgencia o la acción del reporte del médico de primer nivel si has vetado su diagnóstico. Si has clasificado la lesión como de manejo conservador o variante benigna asintomática, estás obligado a reescribir de raíz correctedInterventionPriority, forzando la urgencia a 'moderada' o 'baja' y la Acción Cero a 'Vigilancia clínica neurológica y/o resonancia de control'. Cualquier contradicción donde recomiendes cirugía en Acción Cero pero digas que es benigna no quirúrgica en el tratamiento será penalizada como un fallo crítico de lógica médica.\n\n"
-                    "Si encuentras fallas, VETA los diagnósticos erróneos y re-formula la jerarquía diagnóstica (correctedDifferentialDiagnoses), plan (correctedWorkup), tratamiento (correctedTreatment), la prioridad de intervención (correctedInterventionPriority) y los síndromes (correctedSyndromes).\n"
+                    "Si encuentras fallas, VETA los diagnósticos erróneos y re-formula la jerarquía diagnóstica (correctedDifferentialDiagnoses - asegurando incluir differentialExclusion en cada item), la significancia clínica (correctedClinicalSignificanceGrouping), la estabilidad temporal (correctedTemporalComparison), plan (correctedWorkup), tratamiento (correctedTreatment), la prioridad de intervención (correctedInterventionPriority) y los síndromes (correctedSyndromes).\n"
                     "Responde en ESPAÑOL en formato JSON."
                 )
                 debate_parts.append({"text": debate_prompt})
@@ -1485,9 +1513,10 @@ async def run_clinical_analysis(
                                         "properties": {
                                             "condition": {"type": "STRING"},
                                             "probability": {"type": "STRING", "enum": ["alta", "media", "baja"]},
-                                            "rationale": {"type": "STRING"}
+                                            "rationale": {"type": "STRING"},
+                                            "differentialExclusion": {"type": "STRING"}
                                         },
-                                        "required": ["condition", "probability", "rationale"]
+                                        "required": ["condition", "probability", "rationale", "differentialExclusion"]
                                     }
                                 },
                                 "correctedWorkup": {
@@ -1534,6 +1563,27 @@ async def run_clinical_analysis(
                                         "urgency": {"type": "STRING", "enum": ["inmediata", "alta", "moderada"]}
                                     },
                                     "required": ["actionZero", "rationale", "urgency"]
+                                },
+                                "correctedClinicalSignificanceGrouping": {
+                                    "type": "OBJECT",
+                                    "properties": {
+                                        "criticalFindings": {"type": "ARRAY", "items": {"type": "STRING"}},
+                                        "relevantIncidentalFindings": {"type": "ARRAY", "items": {"type": "STRING"}},
+                                        "nonSignificantFindings": {"type": "ARRAY", "items": {"type": "STRING"}}
+                                    },
+                                    "required": ["criticalFindings", "relevantIncidentalFindings", "nonSignificantFindings"]
+                                },
+                                "correctedTemporalComparison": {
+                                    "type": "OBJECT",
+                                    "properties": {
+                                        "growthDeltaPercent": {"type": "NUMBER"},
+                                        "timeSpanMonths": {"type": "NUMBER"},
+                                        "previousMeasurement": {"type": "STRING"},
+                                        "currentMeasurement": {"type": "STRING"},
+                                        "stabilityAssessment": {"type": "STRING", "enum": ["estable", "progresion_lenta", "progresion_rapida", "indeterminada"]},
+                                        "stabilityRationale": {"type": "STRING"}
+                                    },
+                                    "required": ["stabilityAssessment", "stabilityRationale"]
                                 }
                             },
                             "required": ["evaluations", "boardSummary", "redTeamAudit"]
@@ -1559,6 +1609,8 @@ async def run_clinical_analysis(
                 corrected_treatment = debate_data.get("correctedTreatment")
                 corrected_intervention_priority = debate_data.get("correctedInterventionPriority")
                 corrected_syndromes = debate_data.get("correctedSyndromes")
+                corrected_clinical_significance_grouping = debate_data.get("correctedClinicalSignificanceGrouping")
+                corrected_temporal_comparison = debate_data.get("correctedTemporalComparison")
 
                 # 🛡️ CAPA DE VALIDACIÓN METACOGNITIVA (JUEZ DE LA JUNTA):
                 # Erradicar cualquier discrepancia residual de urgencia si la junta médica determinó que el manejo es conservador.
@@ -1642,7 +1694,9 @@ async def run_clinical_analysis(
             "interventionPriority": parsed_data.get("interventionPriority"),
             "systemicIntegration": parsed_data.get("systemicIntegration"),
             "summary": parsed_data.get("summary", "Sin resumen."),
-            "historicalAuditor": parsed_data.get("historicalAuditor")
+            "historicalAuditor": parsed_data.get("historicalAuditor"),
+            "clinicalSignificanceGrouping": corrected_clinical_significance_grouping or parsed_data.get("clinicalSignificanceGrouping"),
+            "temporalComparison": corrected_temporal_comparison or parsed_data.get("temporalComparison")
         }
     except Exception as e:
         raise Exception(f"Fallo en el análisis clínico: {e}")
