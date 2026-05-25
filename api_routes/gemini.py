@@ -53,6 +53,28 @@ async def invoke_gemini(
     background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user)
 ):
+    async def event_generator():
+        try:
+            task = asyncio.create_task(_invoke_gemini_internal(req_data, request, response, background_tasks, user))
+            while not task.done():
+                yield " "
+                await asyncio.sleep(2)
+            res = task.result()
+            yield json.dumps(res)
+        except HTTPException as he:
+            yield json.dumps({"success": False, "error": "HTTPException", "detail": he.detail})
+        except Exception as e:
+            yield json.dumps({"success": False, "error": "Exception", "detail": str(e)})
+
+    return StreamingResponse(event_generator(), media_type="application/json")
+
+async def _invoke_gemini_internal(
+    req_data: InvokeGeminiRequest, 
+    request: Request, 
+    response: Response,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(get_current_user)
+):
     action = req_data.action
     payload = req_data.payload
     access_code = user.get("accessCode", "ANONYMOUS")
