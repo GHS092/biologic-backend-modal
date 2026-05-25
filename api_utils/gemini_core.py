@@ -68,38 +68,35 @@ def inject_video_scanning_protocol(prompt_text: str, attached_files: Optional[Li
     if not has_video:
         return prompt_text
         
-    video_protocol = (
-        "\n\n=== 📹 PROTOCOLO DE ESCANEO DINÁMICO DE BARRIDOS MÉDICOS (FRAME-BY-FRAME SCANNING) ===\n"
-        "Se ha detectado una secuencia de video / cine-loop dinámico (barrido de tomografía axial computada, "
-        "resonancia magnética, barrido ecográfico o endoscopia en movimiento). Como especialista de élite, estás "
-        "estrictamente obligado a anular el sesgo de promedio (average bias) y aplicar el protocolo de escaneo "
-        "temporal continuo:\n"
-        "1. RECONSTRUCCIÓN CRONOLÓGICA DEL BARRIDO: Comprende que el video representa una progresión espacial y anatómica continua. "
-        "Identifica mentalmente la secuencia del recorrido (ej: de superior a inferior, de anterior a posterior, o de proximal a distal). "
-        "Debes mapear y auditar cada segmento anatómico en su correspondiente ventana de tiempo en el video.\n"
-        "2. AUDITORÍA SECTORIAL DE ÓRGANOS Y COMPARTIMENTOS: No realices resúmenes globales que simplifiquen el barrido. "
-        "Evalúa individualmente cada estructura mayor a medida que aparece en los fotogramas:\n"
-        "   * Tórax/Mediastino: parénquima, vasos, pleura.\n"
-        "   * Abdomen Superior: Hígado (parénquima y vías biliares), Bazo, Estómago, Duodeno y PÁNCREAS (cabeza, proceso uncinado, cuerpo y cola).\n"
-        "   * Retroperitoneo: Aorta, Vena Cava, Riñones y Glándulas Suprarrenales.\n"
-        "   * Abdomen Inferior / Pelvis: Colon, asas de intestino delgado, vejiga, anexos.\n"
-        "3. DETECCIÓN DE ANOMALÍAS TRANSITORIAS Y FOCALES (Transient Lesion Rule): Los hallazgos patológicos críticos "
-        "(tumores sólidos, metástasis, trombos arteriales, dilataciones ductales, colecciones purulentas o micro-calcificaciones) "
-        "suelen ser transitorios en un barrido de video, apareciendo solo durante una fracción corta de fotogramas (ej: del frame 40 al 60). "
-        "Tienes prohibido concluir 'Normalidad' basándote únicamente en que la mayoría del video muestra estructuras normales. "
-        "Si detectas una zona de asimetría, hipodensidad focal, hiperrealce nodular, engrosamiento de pared o interrupción ductal en un "
-        "pequeño grupo de frames, estás obligado a reportarla como un hallazgo crítico y caracterizarla detalladamente.\n"
-        "4. DINÁMICA DE CONDUCTOS Y ESTRUCTURAS TUBULARES: Sigue meticulosamente el trayecto de los conductos (ej: colédoco, "
-        "conducto pancreático principal o Wirsung, uréteres) y vasos sanguíneos a lo largo de los fotogramas. Busca irregularidades de calibre, "
-        "dilataciones (ej: signo de doble conducto), stop abrupto de contraste o defectos de llenado.\n"
-        "5. EXTRACCIÓN DE FOTOGRAMAS FOCALES EN EL INFORME: Al describir tus hallazgos, haz referencia a la posición relativa en el video "
-        "(ej: 'en la mitad del barrido axial', 'en el tercio inferior del video ecográfico') para asegurar la reproducibilidad de la auditoría.\n"
-        "6. AUDITORÍA ANTINEUTRALIDAD (Anti-Normal Check): Si tienes la intención de dictaminar un estudio como normal, realiza "
-        "una autopsia negativa estricta: confirma frame por frame que no existan adenopatías pequeñas en el retroperitoneo, defectos de "
-        "captación de contraste en el páncreas, o colecciones periapendiculares breves. La omisión de una lesión pequeña pero activa "
-        "en un barrido cinético es el error radiológico más costoso.\n"
-    )
-    
+    # DECOUPLED COGNITIVE VIDEO ARCHITECTURE: Load laws dynamically from disk
+    video_protocol = ""
+    try:
+        guide_path = os.path.join(os.path.dirname(__file__), "GUIA_RAZONAMIENTO_CINÉTICO_TEMPORAL_VIDEO.md")
+        if os.path.exists(guide_path):
+            with open(guide_path, "r", encoding="utf-8") as f_guide:
+                video_protocol = f_guide.read()
+            print(f"[Cognitive Engine] Successfully loaded master video scanning guide from {guide_path}")
+    except Exception as read_err:
+        print(f"[Cognitive Engine Error] Failed to read video guide: {read_err}")
+        
+    if not video_protocol:
+        # Robust clinical fallback in case of I/O failure (preserves system security)
+        video_protocol = (
+            "\n\n=== 📹 PROTOCOLO DE ESCANEO DINÁMICO DE BARRIDOS MÉDICOS (FRAME-BY-FRAME SCANNING) ===\n"
+            "Se ha detectado una secuencia de video / cine-loop dinámico (barrido de tomografía axial computada, "
+            "resonancia magnética, barrido ecográfico o endoscopia en movimiento). Como especialista de élite, estás "
+            "estrictamente obligado a anular el sesgo de promedio (average bias) y aplicar el protocolo de escaneo "
+            "temporal continuo:\n"
+            "1. RECONSTRUCCIÓN CRONOLÓGICA DEL BARRIDO: Comprende que el video representa una progresión espacial y anatómica continua. "
+            "Debes mapear y auditar cada segmento anatómico en su correspondiente ventana de tiempo en el video.\n"
+            "2. AUDITORÍA SECTORIAL DE ÓRGANOS Y COMPARTIMENTOS: Evalúa individualmente cada estructura mayor a medida que aparece en los fotogramas (Tórax, Hígado, Riñones, PÁNCREAS cabeza/cuerpo/cola, retroperitoneo, pelvis).\n"
+            "3. DETECCIÓN DE ANOMALÍAS TRANSITORIAS Y FOCALES: Lesiones críticas pueden ser visibles solo en un 5% del video. Un solo frame patológico descarta cualquier suposición de normalidad. Identifica hipodensidades focales o realce nodular.\n"
+            "4. DINÁMICA DE CONDUCTOS Y TRAZABILIDAD: Sigue el trayecto de los conductos y vasos fotograma a fotograma. Busca estenosis, stops y dilataciones retrógradas.\n"
+            "5. AUDITORÍA ANTINEUTRALIDAD: Confirma frame por frame la ausencia de adenopatías o realces. La omisión de una lesión pequeña es el error más costoso.\n"
+        )
+    else:
+        video_protocol = f"\n\n{video_protocol}"
+        
     return prompt_text + video_protocol
 
 
