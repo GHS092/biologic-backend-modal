@@ -51,6 +51,58 @@ async def resolve_attached_file_data(
     return None
 
 
+def inject_video_scanning_protocol(prompt_text: str, attached_files: Optional[List[Dict[str, Any]]] = None) -> str:
+    if not attached_files or not isinstance(attached_files, list):
+        return prompt_text
+        
+    has_video = False
+    for f in attached_files:
+        if not isinstance(f, dict):
+            continue
+        mime = f.get("mimeType", "") or f.get("type", "") or ""
+        url = f.get("videoUrl") or f.get("video_url") or ""
+        if mime.startswith("video/") or url:
+            has_video = True
+            break
+            
+    if not has_video:
+        return prompt_text
+        
+    video_protocol = (
+        "\n\n=== 📹 PROTOCOLO DE ESCANEO DINÁMICO DE BARRIDOS MÉDICOS (FRAME-BY-FRAME SCANNING) ===\n"
+        "Se ha detectado una secuencia de video / cine-loop dinámico (barrido de tomografía axial computada, "
+        "resonancia magnética, barrido ecográfico o endoscopia en movimiento). Como especialista de élite, estás "
+        "estrictamente obligado a anular el sesgo de promedio (average bias) y aplicar el protocolo de escaneo "
+        "temporal continuo:\n"
+        "1. RECONSTRUCCIÓN CRONOLÓGICA DEL BARRIDO: Comprende que el video representa una progresión espacial y anatómica continua. "
+        "Identifica mentalmente la secuencia del recorrido (ej: de superior a inferior, de anterior a posterior, o de proximal a distal). "
+        "Debes mapear y auditar cada segmento anatómico en su correspondiente ventana de tiempo en el video.\n"
+        "2. AUDITORÍA SECTORIAL DE ÓRGANOS Y COMPARTIMENTOS: No realices resúmenes globales que simplifiquen el barrido. "
+        "Evalúa individualmente cada estructura mayor a medida que aparece en los fotogramas:\n"
+        "   * Tórax/Mediastino: parénquima, vasos, pleura.\n"
+        "   * Abdomen Superior: Hígado (parénquima y vías biliares), Bazo, Estómago, Duodeno y PÁNCREAS (cabeza, proceso uncinado, cuerpo y cola).\n"
+        "   * Retroperitoneo: Aorta, Vena Cava, Riñones y Glándulas Suprarrenales.\n"
+        "   * Abdomen Inferior / Pelvis: Colon, asas de intestino delgado, vejiga, anexos.\n"
+        "3. DETECCIÓN DE ANOMALÍAS TRANSITORIAS Y FOCALES (Transient Lesion Rule): Los hallazgos patológicos críticos "
+        "(tumores sólidos, metástasis, trombos arteriales, dilataciones ductales, colecciones purulentas o micro-calcificaciones) "
+        "suelen ser transitorios en un barrido de video, apareciendo solo durante una fracción corta de fotogramas (ej: del frame 40 al 60). "
+        "Tienes prohibido concluir 'Normalidad' basándote únicamente en que la mayoría del video muestra estructuras normales. "
+        "Si detectas una zona de asimetría, hipodensidad focal, hiperrealce nodular, engrosamiento de pared o interrupción ductal en un "
+        "pequeño grupo de frames, estás obligado a reportarla como un hallazgo crítico y caracterizarla detalladamente.\n"
+        "4. DINÁMICA DE CONDUCTOS Y ESTRUCTURAS TUBULARES: Sigue meticulosamente el trayecto de los conductos (ej: colédoco, "
+        "conducto pancreático principal o Wirsung, uréteres) y vasos sanguíneos a lo largo de los fotogramas. Busca irregularidades de calibre, "
+        "dilataciones (ej: signo de doble conducto), stop abrupto de contraste o defectos de llenado.\n"
+        "5. EXTRACCIÓN DE FOTOGRAMAS FOCALES EN EL INFORME: Al describir tus hallazgos, haz referencia a la posición relativa en el video "
+        "(ej: 'en la mitad del barrido axial', 'en el tercio inferior del video ecográfico') para asegurar la reproducibilidad de la auditoría.\n"
+        "6. AUDITORÍA ANTINEUTRALIDAD (Anti-Normal Check): Si tienes la intención de dictaminar un estudio como normal, realiza "
+        "una autopsia negativa estricta: confirma frame por frame que no existan adenopatías pequeñas en el retroperitoneo, defectos de "
+        "captación de contraste en el páncreas, o colecciones periapendiculares breves. La omisión de una lesión pequeña pero activa "
+        "en un barrido cinético es el error radiológico más costoso.\n"
+    )
+    
+    return prompt_text + video_protocol
+
+
 # Configurations injected at runtime
 current_admin_config: Dict[str, Any] = {}
 
@@ -930,6 +982,7 @@ async def run_tribunal(
                 "=== INSTRUCCIÓN DE SERENDIPIA ===\nUtiliza activamente esta información para cruzar conceptos. Si se te proporciona un CASO ALEATORIO, es tu obligación científica buscar conexiones transversales, reposicionamiento de fármacos o mecanismos compartidos.\n"
             )
 
+        prompt_text = inject_video_scanning_protocol(prompt_text, attached_files)
         prompt_text += f"{literature_context}\n\nResponde en ESPAÑOL en formato JSON estructurado, rellenando todos los nodos de razonamiento para cada hipótesis."
         investigator_parts.append({"text": prompt_text})
 
@@ -1015,13 +1068,10 @@ async def run_tribunal(
     try:
         critic_parts = []
         if attached_files:
-            for file in attached_files:
-                critic_parts.append({
-                    "inline_data": {
-                        "data": file["data"],
-                        "mime_type": file["mimeType"]
-                    }
-                })
+            for idx, file in enumerate(attached_files):
+                resolved = await resolve_attached_file_data(file, on_step_update, idx)
+                if resolved:
+                    critic_parts.append(resolved)
 
         critic_prompt = (
             "Eres un Crítico Clínico Élite (El Tribunal de Isomorfismo), implacable, escéptico y experto en fisiología humana, farmacología y toxicología.\n"
@@ -1046,6 +1096,7 @@ async def run_tribunal(
         if attached_files:
             critic_prompt += "También, asigna un 'documentFidelityScore' (0-100) que indique qué tan fiel es la hipótesis a la evidencia de los documentos.\n"
         
+        critic_prompt = inject_video_scanning_protocol(critic_prompt, attached_files)
         critic_prompt += "Finalmente, escribe un resumen final del tribunal.\nResponde en ESPAÑOL en formato JSON estructurado."
         critic_parts.append({"text": critic_prompt})
 
@@ -1236,6 +1287,7 @@ async def run_clinical_analysis(
         if past_context:
             prompt_text += f"\n=== BASE DE CONOCIMIENTO (HIVE-MIND) ===\nAquí están los aprendizajes pasados:\n{past_context}\n"
 
+        prompt_text = inject_video_scanning_protocol(prompt_text, attached_files)
         prompt_text += f"{literature_context}\n\nResponde en ESPAÑOL en formato JSON estricto."
         parts.append({"text": prompt_text})
 
@@ -1866,6 +1918,7 @@ async def run_epidemiology_analysis(
             "9. Resumen (summary)\n\n"
             "Responde en ESPAÑOL en formato JSON estricto."
         )
+        prompt_text = inject_video_scanning_protocol(prompt_text, attached_files)
         parts.append({"text": prompt_text})
 
         async def run_epi(ai):
@@ -2159,6 +2212,7 @@ async def run_immunology_analysis(
             "6. Resumen (summary)\n\n"
             "Responde en ESPAÑOL en formato JSON estricto."
         )
+        prompt_text = inject_video_scanning_protocol(prompt_text, attached_files)
         parts.append({"text": prompt_text})
 
         async def run_imm(ai):
@@ -2506,6 +2560,7 @@ async def continue_debate(
             "Responde en ESPAÑOL en formato JSON."
         )
 
+    prompt_text = inject_video_scanning_protocol(prompt_text, attached_files)
     chat_parts.append({"text": prompt_text})
 
     async def run_chat(ai):
