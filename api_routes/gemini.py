@@ -5,6 +5,8 @@ import datetime
 import hashlib
 import jwt
 from fastapi import APIRouter, Request, Response, HTTPException, status, Depends, BackgroundTasks
+from fastapi.responses import StreamingResponse
+import asyncio
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 from supabase import create_client, Client
@@ -60,11 +62,11 @@ async def invoke_gemini(
                 yield " "
                 await asyncio.sleep(2)
             res = task.result()
-            yield json.dumps(res)
+            yield json.dumps(res, ensure_ascii=False)
         except HTTPException as he:
-            yield json.dumps({"success": False, "error": "HTTPException", "detail": he.detail})
+            yield json.dumps({"success": False, "error": "HTTPException", "detail": he.detail}, ensure_ascii=False)
         except Exception as e:
-            yield json.dumps({"success": False, "error": "Exception", "detail": str(e)})
+            yield json.dumps({"success": False, "error": "Exception", "detail": str(e)}, ensure_ascii=False)
 
     return StreamingResponse(event_generator(), media_type="application/json")
 
