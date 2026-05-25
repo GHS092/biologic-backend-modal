@@ -4,7 +4,7 @@ import json
 import datetime
 import hashlib
 import jwt
-from fastapi import APIRouter, Request, Response, HTTPException, status, Depends, BackgroundTasks
+from fastapi import APIRouter, Request, Response, HTTPException, status, Depends, BackgroundTasks, UploadFile, File
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 from supabase import create_client, Client
@@ -18,6 +18,52 @@ router = APIRouter()
 supabase_url = os.environ.get("SUPABASE_URL", "https://dominio-faltante.supabase.co")
 supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "llave-faltante-ey")
 supabase_admin: Client = create_client(supabase_url, supabase_key)
+
+@router.post("/upload-media")
+async def upload_media(
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user)
+):
+    try:
+        import time
+        import re
+        
+        # Read file bytes
+        file_bytes = await file.read()
+        file_name = file.filename
+        
+        # Clean file name and determine path
+        clean_file_name = re.sub(r'[^a-zA-Z0-9.-]', '_', file_name)
+        file_path = f"media/{int(time.time() * 1000)}_{clean_file_name}"
+        
+        # Upload to Supabase Storage
+        supabase_admin.storage.from_("medical_files").upload(
+            path=file_path,
+            file=file_bytes,
+            file_options={"content_type": file.content_type or "application/octet-stream", "upsert": "true"}
+        )
+        
+        # Get public URL
+        url_res = supabase_admin.storage.from_("medical_files").get_public_url(file_path)
+        if isinstance(url_res, str):
+            public_url = url_res
+        elif hasattr(url_res, "public_url"):
+            public_url = url_res.public_url
+        else:
+            public_url = str(url_res)
+            
+        return {
+            "success": True,
+            "publicUrl": public_url,
+            "name": file_name,
+            "mimeType": file.content_type
+        }
+    except Exception as e:
+        print(f"Error uploading media: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"No se pudo cargar el archivo en el almacenamiento en la nube: {str(e)}"
+        )
 
 # Request Schema for /invoke-gemini
 class InvokeGeminiRequest(BaseModel):
@@ -599,6 +645,24 @@ async def invoke_gemini(
     except Exception as error:
         print(f"[Error Vercel] Acción {action} falló: {error}")
         raise HTTPException(status_code=500, detail=str(error) or "Fallo interno en el servidor seguro.")
+    finally:
+        try:
+            if 'payload' in locals() and isinstance(payload, dict):
+                attached_files = payload.get("attachedFiles")
+                if attached_files and isinstance(attached_files, list):
+                    for f in attached_files:
+                        video_url = f.get("videoUrl") or f.get("video_url")
+                        if video_url and "medical_files/" in video_url:
+                            parts = video_url.split("medical_files/")
+                            if len(parts) > 1:
+                                path = parts[1].split("?")[0]
+                                try:
+                                    supabase_admin.storage.from_("medical_files").remove([path])
+                                    print(f"[Cleanup] Auto-deleted temporary video '{path}' from Supabase Storage post-analysis.")
+                                except Exception as delete_err:
+                                    print(f"[Cleanup Error] Failed to auto-delete video '{path}': {delete_err}")
+        except Exception as cleanup_err:
+            print(f"[Cleanup Finally Error] {cleanup_err}")
 
 
 @router.post("/analyze-patient")

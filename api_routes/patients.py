@@ -48,20 +48,29 @@ async def create_patient(req_data: CreatePatientRequest, user: dict = Depends(ge
     try:
         fecha_format = None
         if edad is not None:
+            # 1. Comprobar si es un formato de fecha ISO YYYY-MM-DD
             try:
-                edad_num = int(edad)
-                if edad_num > 1900:
-                    fecha_format = f"{edad_num}-01-01"
-                elif edad_num < 130:
-                    current_year = datetime.datetime.now().year
-                    fecha_format = f"{current_year - edad_num}-01-01"
-            except (ValueError, TypeError):
-                pass
+                datetime.datetime.strptime(str(edad), "%Y-%m-%d")
+                fecha_format = str(edad)
+            except ValueError:
+                # 2. Si no, tratar como número de años/edad relativa
+                try:
+                    edad_num = int(edad)
+                    if edad_num > 1900:
+                        fecha_format = f"{edad_num}-01-01"
+                    elif edad_num < 130:
+                        current_year = datetime.datetime.now().year
+                        fecha_format = f"{current_year - edad_num}-01-01"
+                except (ValueError, TypeError):
+                    pass
 
         payload = {
             "dni": paciente_dni,
             "nombre_completo": nombre
         }
+
+        if ciudad:
+            payload["ciudad"] = ciudad
 
         if fecha_format:
             payload["fecha_nacimiento"] = fecha_format

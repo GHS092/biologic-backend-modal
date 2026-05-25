@@ -8,6 +8,49 @@ from typing import List, Dict, Any, Optional, Tuple
 from google import genai
 from google.genai import types
 
+# Helper to download and base64-encode files (especially videos from Supabase Storage) safely
+async def resolve_attached_file_data(
+    file: Dict[str, Any],
+    on_step_update: Optional[Any] = None,
+    idx: int = 0
+) -> Optional[Dict[str, Any]]:
+    import urllib.request
+    import base64
+    video_url = file.get("videoUrl") or file.get("video_url")
+    if video_url:
+        try:
+            if on_step_update:
+                on_step_update({
+                    "id": f"dl-video-{idx}-{hash(video_url)}",
+                    "type": "analysis",
+                    "title": f"Cargando Cine-loop: {file.get('name', 'video')}",
+                    "content": f"Transfiriendo barrido o cine-loop dinámico desde Supabase Storage a memoria serverless...",
+                    "confidence": 0.95,
+                    "timestamp": int(asyncio.get_event_loop().time() * 1000)
+                })
+            req = urllib.request.Request(video_url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=30) as response:
+                video_bytes = response.read()
+            base64_data = base64.b64encode(video_bytes).decode('utf-8')
+            return {
+                "inline_data": {
+                    "data": base64_data,
+                    "mime_type": file.get("mimeType") or "application/octet-stream"
+                }
+            }
+        except Exception as dl_err:
+            print(f"[Backend Download Error] Fallo al descargar video {video_url}: {dl_err}")
+            return None
+    elif file.get("data"):
+        return {
+            "inline_data": {
+                "data": file["data"],
+                "mime_type": file.get("mimeType") or "application/octet-stream"
+            }
+        }
+    return None
+
+
 # Configurations injected at runtime
 current_admin_config: Dict[str, Any] = {}
 
@@ -294,13 +337,10 @@ async def extract_visual_phenotype(attached_files: List[Dict[str, Any]], context
             "Basándote ESTRICTAMENTE en este contexto y bajo la regla de Agnosia Forzada, describe en máximo 3 oraciones los hallazgos morfológicos o valores de laboratorio más relevantes. Extrae puramente la evidencia física y métrica."
         )
         parts = [{"text": instruction}]
-        for file in attached_files:
-            parts.append({
-                "inline_data": {
-                    "data": file["data"],
-                    "mime_type": file["mimeType"]
-                }
-            })
+        for idx, file in enumerate(attached_files):
+            resolved = await resolve_attached_file_data(file, idx=idx)
+            if resolved:
+                parts.append(resolved)
 
         async def run_phenotype(ai):
             if isinstance(ai, OpenRouterWrapper):
@@ -514,13 +554,10 @@ async def run_visual_triage(attached_files: List[Dict[str, Any]], context_topic:
             "Responde en formato JSON estricto: { \"level\": \"ROJO\" | \"VERDE\", \"justification\": \"Breve explicación de los hallazgos que justifican la alerta.\" }"
         )
         parts = [{"text": instruction}]
-        for file in attached_files:
-            parts.append({
-                "inline_data": {
-                    "data": file["data"],
-                    "mime_type": file["mimeType"]
-                }
-            })
+        for idx, file in enumerate(attached_files):
+            resolved = await resolve_attached_file_data(file, idx=idx)
+            if resolved:
+                parts.append(resolved)
 
         async def run_triage(ai):
             if isinstance(ai, OpenRouterWrapper):
@@ -772,13 +809,10 @@ async def run_tribunal(
         })
         try:
             assimilation_parts = []
-            for file in attached_files:
-                assimilation_parts.append({
-                    "inline_data": {
-                        "data": file["data"],
-                        "mime_type": file["mimeType"]
-                    }
-                })
+            for idx, file in enumerate(attached_files):
+                resolved = await resolve_attached_file_data(file, on_step_update, idx)
+                if resolved:
+                    assimilation_parts.append(resolved)
             assimilation_parts.append({
                 "text": (
                     f"Lee estos documentos o imágenes médicas. El usuario quiere investigar sobre: \"{topic}\".\n"
@@ -859,13 +893,10 @@ async def run_tribunal(
     try:
         investigator_parts = []
         if attached_files:
-            for file in attached_files:
-                investigator_parts.append({
-                    "inline_data": {
-                        "data": file["data"],
-                        "mime_type": file["mimeType"]
-                    }
-                })
+            for idx, file in enumerate(attached_files):
+                resolved = await resolve_attached_file_data(file, on_step_update, idx)
+                if resolved:
+                    investigator_parts.append(resolved)
 
         literature_context = await gather_literature_context(topic, on_step_update, "tribunal", attached_files)
 
@@ -1114,13 +1145,10 @@ async def run_clinical_analysis(
     try:
         parts = []
         if attached_files:
-            for file in attached_files:
-                parts.append({
-                    "inline_data": {
-                        "data": file["data"],
-                        "mime_type": file["mimeType"]
-                    }
-                })
+            for idx, file in enumerate(attached_files):
+                resolved = await resolve_attached_file_data(file, on_step_update, idx)
+                if resolved:
+                    parts.append(resolved)
 
         literature_context = await gather_literature_context(topic, on_step_update, "clin", attached_files)
 
@@ -1176,6 +1204,7 @@ async def run_clinical_analysis(
         if attached_files and len(attached_files) > 0:
             prompt_text += (
                 "\n=== DOCUMENTOS E IMÁGENES ADJUNTAS ===\nAnaliza los archivos adjuntos.\n"
+                "REGLA CRÍTICA DE VIDEOS / CINE-LOOPS: Si se adjuntan videos o cine-loops (ultrasonido dinámico, barridos de resonancia magnética o tomografía), analiza con rigurosidad la secuencia temporal de fotogramas para evaluar la cinética de flujo, vascularidad, y comportamiento mecánico/dinámico de la anomalía.\n"
                 "REGLA CRÍTICA (CONTRADICCIÓN Y JERARQUÍA DE EVIDENCIA): Compara el texto explícito (prompt del usuario o OCR) con los hallazgos visuales puros de las imágenes. Si existe una CONTRADICCIÓN CLARA entre lo que dice el texto (ej. \"Neurocisticercosis\") y lo que muestran las imágenes (ej. patrón clásico de \"Encefalitis Herpética\" en lóbulo temporal), DEBES DETENER TU ANÁLISIS DE ANCLAJE y declarar explícitamente una \"CONTRADICCIÓN CLÍNICO-RADIOLÓGICA\" al inicio de tu reporte. NO asumas ciegamente que la imagen es lo que dice el texto si la morfología es opuesta. Señala el error en los archivos al usuario.\n\n"
                 "PASO 1 (Extracción de Datos/OCR e Historial): Lee meticulosamente todo el texto en las imágenes o documentos. Extrae antecedentes, laboratorios previos, diagnósticos y procedimientos. Coloca esto en 'extractedClinicalText'. REGLA DE NO ALUCINACIÓN: Si un dato no está en los documentos, no lo inventes. Pon \"Desconocido\".\n"
                 "PASO 2 (Matriz de Signos Radiológicos/Endoscópicos): Busca signos clave en las imágenes. Identifica signos clásicos/epónimos en 'radiologicalSigns'.\n"
@@ -1804,13 +1833,10 @@ async def run_epidemiology_analysis(
     try:
         parts = []
         if attached_files:
-            for file in attached_files:
-                parts.append({
-                    "inline_data": {
-                        "data": file["data"],
-                        "mime_type": file["mimeType"]
-                    }
-                })
+            for idx, file in enumerate(attached_files):
+                resolved = await resolve_attached_file_data(file, on_step_update, idx)
+                if resolved:
+                    parts.append(resolved)
 
         literature_context = await gather_literature_context(topic, on_step_update, "epi", attached_files)
 
@@ -2105,13 +2131,10 @@ async def run_immunology_analysis(
     try:
         parts = []
         if attached_files:
-            for file in attached_files:
-                parts.append({
-                    "inline_data": {
-                        "data": file["data"],
-                        "mime_type": file["mimeType"]
-                    }
-                })
+            for idx, file in enumerate(attached_files):
+                resolved = await resolve_attached_file_data(file, on_step_update, idx)
+                if resolved:
+                    parts.append(resolved)
 
         literature_context = await gather_literature_context(topic, on_step_update, "imm", attached_files)
 
@@ -2365,13 +2388,10 @@ async def continue_debate(
             })
             has_document_context = True
         else:
-            for file in attached_files:
-                chat_parts.append({
-                    "inline_data": {
-                        "data": file["data"],
-                        "mime_type": file["mimeType"]
-                    }
-                })
+            for idx, file in enumerate(attached_files):
+                resolved = await resolve_attached_file_data(file, idx=idx)
+                if resolved:
+                    chat_parts.append(resolved)
             has_document_context = True
 
     mode = session.get("mode", "investigator")
