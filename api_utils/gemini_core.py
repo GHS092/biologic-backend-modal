@@ -50,54 +50,7 @@ async def resolve_attached_file_data(
         }
     return None
 
-
-def inject_video_scanning_protocol(prompt_text: str, attached_files: Optional[List[Dict[str, Any]]] = None) -> str:
-    if not attached_files or not isinstance(attached_files, list):
-        return prompt_text
-        
-    has_video = False
-    for f in attached_files:
-        if not isinstance(f, dict):
-            continue
-        mime = f.get("mimeType", "") or f.get("type", "") or ""
-        url = f.get("videoUrl") or f.get("video_url") or ""
-        if mime.startswith("video/") or url:
-            has_video = True
-            break
-            
-    if not has_video:
-        return prompt_text
-        
-    # DECOUPLED COGNITIVE VIDEO ARCHITECTURE: Load laws dynamically from disk
-    video_protocol = ""
-    try:
-        guide_path = os.path.join(os.path.dirname(__file__), "GUIA_RAZONAMIENTO_CINÉTICO_TEMPORAL_VIDEO.md")
-        if os.path.exists(guide_path):
-            with open(guide_path, "r", encoding="utf-8") as f_guide:
-                video_protocol = f_guide.read()
-            print(f"[Cognitive Engine] Successfully loaded master video scanning guide from {guide_path}")
-    except Exception as read_err:
-        print(f"[Cognitive Engine Error] Failed to read video guide: {read_err}")
-        
-    if not video_protocol:
-        # Robust clinical fallback in case of I/O failure (preserves system security)
-        video_protocol = (
-            "\n\n=== 📹 PROTOCOLO DE ESCANEO DINÁMICO DE BARRIDOS MÉDICOS (FRAME-BY-FRAME SCANNING) ===\n"
-            "Se ha detectado una secuencia de video / cine-loop dinámico (barrido de tomografía axial computada, "
-            "resonancia magnética, barrido ecográfico o endoscopia en movimiento). Como especialista de élite, estás "
-            "estrictamente obligado a anular el sesgo de promedio (average bias) y aplicar el protocolo de escaneo "
-            "temporal continuo:\n"
-            "1. RECONSTRUCCIÓN CRONOLÓGICA DEL BARRIDO: Comprende que el video representa una progresión espacial y anatómica continua. "
-            "Debes mapear y auditar cada segmento anatómico en su correspondiente ventana de tiempo en el video.\n"
-            "2. AUDITORÍA SECTORIAL DE ÓRGANOS Y COMPARTIMENTOS: Evalúa individualmente cada estructura mayor a medida que aparece en los fotogramas (Tórax, Hígado, Riñones, PÁNCREAS cabeza/cuerpo/cola, retroperitoneo, pelvis).\n"
-            "3. DETECCIÓN DE ANOMALÍAS TRANSITORIAS Y FOCALES: Lesiones críticas pueden ser visibles solo en un 5% del video. Un solo frame patológico descarta cualquier suposición de normalidad. Identifica hipodensidades focales o realce nodular.\n"
-            "4. DINÁMICA DE CONDUCTOS Y TRAZABILIDAD: Sigue el trayecto de los conductos y vasos fotograma a fotograma. Busca estenosis, stops y dilataciones retrógradas.\n"
-            "5. AUDITORÍA ANTINEUTRALIDAD: Confirma frame por frame la ausencia de adenopatías o realces. La omisión de una lesión pequeña es el error más costoso.\n"
-        )
-    else:
-        video_protocol = f"\n\n{video_protocol}"
-        
-    return prompt_text + video_protocol
+from .video_reasoning import inject_video_scanning_protocol
 
 
 # Configurations injected at runtime
@@ -311,12 +264,17 @@ async def gather_literature_context(
         parts = [{"text": search_prompt}]
         if attached_files and len(attached_files) > 0:
             for file in attached_files:
-                parts.append({
-                    "inline_data": {
-                        "data": file["data"],
-                        "mime_type": file["mimeType"]
-                    }
-                })
+                mime = file.get("mimeType", "") or file.get("type", "") or ""
+                url = file.get("videoUrl") or file.get("video_url") or ""
+                if mime.startswith("video/") or url:
+                    continue # Skip heavy videos in Europe PMC query planner to avoid overhead/crash
+                if file.get("data"):
+                    parts.append({
+                        "inline_data": {
+                            "data": file["data"],
+                            "mime_type": file["mimeType"]
+                        }
+                    })
 
         async def run_plan(ai):
             # In official SDK we use client.aio for async
@@ -1192,11 +1150,13 @@ async def run_clinical_analysis(
 
     try:
         parts = []
+        resolved_media_parts = []
         if attached_files:
             for idx, file in enumerate(attached_files):
                 resolved = await resolve_attached_file_data(file, on_step_update, idx)
                 if resolved:
                     parts.append(resolved)
+                    resolved_media_parts.append(resolved)
 
         literature_context = await gather_literature_context(topic, on_step_update, "clin", attached_files)
 
@@ -1518,15 +1478,7 @@ async def run_clinical_analysis(
                 "timestamp": int(asyncio.get_event_loop().time() * 1000)
             })
             try:
-                debate_parts = []
-                if attached_files:
-                    for file in attached_files:
-                        debate_parts.append({
-                            "inline_data": {
-                                "data": file["data"],
-                                "mime_type": file["mimeType"]
-                            }
-                        })
+                debate_parts = list(resolved_media_parts)
 
                 debate_prompt = (
                     "Eres el 'Red Team Médico' (Junta Médica Antagonista y Escéptica de Rango Élite).\n"
@@ -2665,13 +2617,10 @@ async def expand_hypothesis(
             })
             has_document_context = True
         else:
-            for file in attached_files:
-                parts.append({
-                    "inline_data": {
-                        "data": file["data"],
-                        "mime_type": file["mimeType"]
-                    }
-                })
+            for idx, file in enumerate(attached_files):
+                resolved = await resolve_attached_file_data(file, idx=idx)
+                if resolved:
+                    parts.append(resolved)
             has_document_context = True
 
     final_text = ""
