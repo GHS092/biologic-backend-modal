@@ -16,7 +16,24 @@ async def resolve_attached_file_data(
 ) -> Optional[Dict[str, Any]]:
     import urllib.request
     import base64
+    
+    file_name = file.get("name", "").lower()
     video_url = file.get("videoUrl") or file.get("video_url")
+    
+    # Smart Mime-Type inference to avoid fallback to application/octet-stream
+    mime_type = file.get("mimeType") or file.get("mime_type") or file.get("type") or ""
+    if not mime_type or mime_type == "application/octet-stream":
+        if file_name.endswith(".mp4") or file_name.endswith(".mov") or file_name.endswith(".avi") or file_name.endswith(".webm") or video_url:
+            mime_type = "video/mp4"
+        elif file_name.endswith(".png"):
+            mime_type = "image/png"
+        elif file_name.endswith(".jpg") or file_name.endswith(".jpeg"):
+            mime_type = "image/jpeg"
+        elif file_name.endswith(".pdf"):
+            mime_type = "application/pdf"
+        else:
+            mime_type = "application/octet-stream"
+
     if video_url:
         try:
             if on_step_update:
@@ -28,24 +45,28 @@ async def resolve_attached_file_data(
                     "confidence": 0.95,
                     "timestamp": int(asyncio.get_event_loop().time() * 1000)
                 })
+            print(f"[Backend File Resolver] Descargando video desde URL: {video_url} | Mime: {mime_type}")
             req = urllib.request.Request(video_url, headers={'User-Agent': 'Mozilla/5.0'})
             with urllib.request.urlopen(req, timeout=30) as response:
                 video_bytes = response.read()
             base64_data = base64.b64encode(video_bytes).decode('utf-8')
+            print(f"[Backend File Resolver] Video descargado con éxito: {len(video_bytes)} bytes | Mime asignado: {mime_type}")
             return {
                 "inline_data": {
                     "data": base64_data,
-                    "mime_type": file.get("mimeType") or "application/octet-stream"
+                    "mime_type": mime_type
                 }
             }
         except Exception as dl_err:
             print(f"[Backend Download Error] Fallo al descargar video {video_url}: {dl_err}")
             return None
     elif file.get("data"):
+        raw_data = file["data"]
+        print(f"[Backend File Resolver] Cargando archivo local: {file.get('name')} | Mime: {mime_type} | Size: {len(raw_data)} chars")
         return {
             "inline_data": {
-                "data": file["data"],
-                "mime_type": file.get("mimeType") or "application/octet-stream"
+                "data": raw_data,
+                "mime_type": mime_type
             }
         }
     return None
