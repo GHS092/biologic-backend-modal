@@ -356,17 +356,23 @@ async def invoke_gemini(
             )
 
         elif action == "runClinicalAnalysis":
-            draft_report = await gemini_core.run_clinical_analysis(
-                payload.get("topic"), 
-                dummy_on_step_update, 
-                payload.get("pastContext"), 
-                payload.get("attachedFiles"), 
-                payload.get("region"), 
-                payload.get("city"), 
-                payload.get("isDebateMode"), 
-                payload.get("searchCategory"), 
-                payload.get("suspectedPathology")
-            )
+            async def clinical_stream():
+                task = asyncio.create_task(gemini_core.run_clinical_analysis(
+                    payload.get("topic"), 
+                    dummy_on_step_update, 
+                    payload.get("pastContext"), 
+                    payload.get("attachedFiles"), 
+                    payload.get("region"), 
+                    payload.get("city"), 
+                    payload.get("isDebateMode"), 
+                    payload.get("searchCategory"), 
+                    payload.get("suspectedPathology")
+                ))
+                while not task.done():
+                    yield b" "
+                    await asyncio.sleep(5)
+                try:
+                    draft_report = task.result()
             
             true_diagnosis = ""
             if draft_report.get("systemicIntegration") and draft_report["systemicIntegration"].get("unifiedDiagnosis"):
@@ -435,7 +441,10 @@ async def invoke_gemini(
             except Exception as e:
                 print(f"[Auditor Maestro] Omisión de búsqueda de memoria final: {e}")
 
-            result = draft_report
+                    yield json.dumps({"success": True, "data": draft_report}).encode("utf-8")
+                except Exception as e:
+                    yield json.dumps({"error": str(e)}).encode("utf-8")
+            return StreamingResponse(clinical_stream(), media_type="application/json")
 
         elif action == "amendClinicalReport":
             result = await gemini_core.amend_clinical_report(payload.get("oldReport"), payload.get("cognitiveAutopsy"))

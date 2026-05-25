@@ -760,18 +760,15 @@ async def generate_embedding(text: str) -> List[float]:
         ai = get_random_ai_client(force_google=True)
         try:
             res = await ai.aio.models.embed_content(
-                model="text-embedding-004",
+                model="models/text-embedding-004",
                 contents=text
             )
         except Exception as e:
-            if "NOT_FOUND" in str(e) or "404" in str(e):
-                print("[Embedding System] Fallback to embedding-001")
-                res = await ai.aio.models.embed_content(
-                    model="embedding-001",
-                    contents=text
-                )
-            else:
-                raise e
+            print(f"[Embedding System] Fallback to embedding-001")
+            res = await ai.aio.models.embed_content(
+                model="models/embedding-001",
+                contents=text
+            )
 
         # Extract values
         if res.embeddings and len(res.embeddings) > 0:
@@ -1224,7 +1221,7 @@ async def run_clinical_analysis(
             if triage.get("level") == "ROJO":
                 triage_info = (
                     f"\n\n🚨 ALARMA DE TRIAJE ACTIVADA (CÓDIGO ROJO): El Agente de Triaje ha detectado riesgo inminente: {triage.get('justification')}.\n"
-                    "TIENES ESTRICTAMENTE PROHIBIDO USAR EL MODO GUILLOTINA O EL FILTRO DE NORMALIDAD. Enfócate exclusivamente en localizar la obstrucción anatómica, tensión mecánica o daño letal. NO diagnostiques 'variantes normales' frente a esta emergencia."
+                    "Sin embargo, MANTÉN LA MÁXIMA OBJETIVIDAD CIENTÍFICA. Si al analizar rigurosamente las imágenes determinas con certeza que NO hay evidencia de daño letal, obstrucción o patología, TIENES LA OBLIGACIÓN ABSOLUTA de reportar 'Sana Normalidad' o 'Variante benigna'. No generes falsos positivos solo por esta alarma."
                 )
             else:
                 triage_info = (
