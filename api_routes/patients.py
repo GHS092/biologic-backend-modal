@@ -41,6 +41,7 @@ async def create_patient(req_data: CreatePatientRequest, user: dict = Depends(ge
     paciente_dni = req_data.paciente_dni
     nombre = req_data.nombre
     edad = req_data.edad
+    ciudad = req_data.ciudad
 
     if not paciente_dni or not nombre:
         raise HTTPException(status_code=400, detail="Faltan parámetros obligatorios.")
