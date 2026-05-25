@@ -8,72 +8,6 @@ from typing import List, Dict, Any, Optional, Tuple
 from google import genai
 from google.genai import types
 
-# Helper to download and base64-encode files (especially videos from Supabase Storage) safely
-async def resolve_attached_file_data(
-    file: Dict[str, Any],
-    on_step_update: Optional[Any] = None,
-    idx: int = 0
-) -> Optional[Dict[str, Any]]:
-    import urllib.request
-    import base64
-    
-    file_name = file.get("name", "").lower()
-    video_url = file.get("videoUrl") or file.get("video_url")
-    
-    # Smart Mime-Type inference to avoid fallback to application/octet-stream
-    mime_type = file.get("mimeType") or file.get("mime_type") or file.get("type") or ""
-    if not mime_type or mime_type == "application/octet-stream":
-        if file_name.endswith(".mp4") or file_name.endswith(".mov") or file_name.endswith(".avi") or file_name.endswith(".webm") or video_url:
-            mime_type = "video/mp4"
-        elif file_name.endswith(".png"):
-            mime_type = "image/png"
-        elif file_name.endswith(".jpg") or file_name.endswith(".jpeg"):
-            mime_type = "image/jpeg"
-        elif file_name.endswith(".pdf"):
-            mime_type = "application/pdf"
-        else:
-            mime_type = "application/octet-stream"
-
-    if video_url:
-        try:
-            if on_step_update:
-                on_step_update({
-                    "id": f"dl-video-{idx}-{hash(video_url)}",
-                    "type": "analysis",
-                    "title": f"Cargando Cine-loop: {file.get('name', 'video')}",
-                    "content": f"Transfiriendo barrido o cine-loop dinámico desde Supabase Storage a memoria serverless...",
-                    "confidence": 0.95,
-                    "timestamp": int(asyncio.get_event_loop().time() * 1000)
-                })
-            print(f"[Backend File Resolver] Descargando video desde URL: {video_url} | Mime: {mime_type}")
-            req = urllib.request.Request(video_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=30) as response:
-                video_bytes = response.read()
-            base64_data = base64.b64encode(video_bytes).decode('utf-8')
-            print(f"[Backend File Resolver] Video descargado con éxito: {len(video_bytes)} bytes | Mime asignado: {mime_type}")
-            return {
-                "inline_data": {
-                    "data": base64_data,
-                    "mime_type": mime_type
-                }
-            }
-        except Exception as dl_err:
-            print(f"[Backend Download Error] Fallo al descargar video {video_url}: {dl_err}")
-            return None
-    elif file.get("data"):
-        raw_data = file["data"]
-        print(f"[Backend File Resolver] Cargando archivo local: {file.get('name')} | Mime: {mime_type} | Size: {len(raw_data)} chars")
-        return {
-            "inline_data": {
-                "data": raw_data,
-                "mime_type": mime_type
-            }
-        }
-    return None
-
-from .video_reasoning import inject_video_scanning_protocol
-
-
 # Configurations injected at runtime
 current_admin_config: Dict[str, Any] = {}
 
@@ -266,26 +200,6 @@ async def gather_literature_context(
     attached_files: Optional[List[Dict[str, Any]]] = None
 ) -> str:
     from .literature import search_europe_pmc, get_full_text_sections
-    
-    # RAG DETOX: If it's a pure video scan and the topic is a generic conversational prompt,
-    # we bypass literature search to prevent anchoring bias.
-    has_video = False
-    if attached_files:
-        for file in attached_files:
-            mime = file.get("mimeType", "") or file.get("type", "") or file.get("mime_type", "") or ""
-            url = file.get("videoUrl") or file.get("video_url") or ""
-            if mime.startswith("video/") or url:
-                has_video = True
-                break
-
-    if has_video:
-        topic_lower = topic.lower()
-        clinical_keywords = ["pancreas", "pancreatico", "cancer", "tumor", "masa", "mass", "dolor", "pain", "ictericia", "jaundice", "obstru", "biliar", "coledoco", "duodeno", "enostosis", "escler", "quiste", "cyst", "bosniak"]
-        is_generic_prompt = not any(kw in topic_lower for kw in clinical_keywords)
-        if is_generic_prompt:
-            print("[RAG Detox] Generic video scan detected. Bypassing literature search to prevent anchoring bias.")
-            return ""
-
     try:
         on_step_update({
             "id": f"{mode_prefix}-research-plan-{int(asyncio.get_event_loop().time() * 1000)}",
@@ -305,17 +219,12 @@ async def gather_literature_context(
         parts = [{"text": search_prompt}]
         if attached_files and len(attached_files) > 0:
             for file in attached_files:
-                mime = file.get("mimeType", "") or file.get("type", "") or ""
-                url = file.get("videoUrl") or file.get("video_url") or ""
-                if mime.startswith("video/") or url:
-                    continue # Skip heavy videos in Europe PMC query planner to avoid overhead/crash
-                if file.get("data"):
-                    parts.append({
-                        "inline_data": {
-                            "data": file["data"],
-                            "mime_type": file["mimeType"]
-                        }
-                    })
+                parts.append({
+                    "inline_data": {
+                        "data": file["data"],
+                        "mime_type": file["mimeType"]
+                    }
+                })
 
         async def run_plan(ai):
             # In official SDK we use client.aio for async
@@ -385,10 +294,13 @@ async def extract_visual_phenotype(attached_files: List[Dict[str, Any]], context
             "Basándote ESTRICTAMENTE en este contexto y bajo la regla de Agnosia Forzada, describe en máximo 3 oraciones los hallazgos morfológicos o valores de laboratorio más relevantes. Extrae puramente la evidencia física y métrica."
         )
         parts = [{"text": instruction}]
-        for idx, file in enumerate(attached_files):
-            resolved = await resolve_attached_file_data(file, idx=idx)
-            if resolved:
-                parts.append(resolved)
+        for file in attached_files:
+            parts.append({
+                "inline_data": {
+                    "data": file["data"],
+                    "mime_type": file["mimeType"]
+                }
+            })
 
         async def run_phenotype(ai):
             if isinstance(ai, OpenRouterWrapper):
@@ -602,10 +514,13 @@ async def run_visual_triage(attached_files: List[Dict[str, Any]], context_topic:
             "Responde en formato JSON estricto: { \"level\": \"ROJO\" | \"VERDE\", \"justification\": \"Breve explicación de los hallazgos que justifican la alerta.\" }"
         )
         parts = [{"text": instruction}]
-        for idx, file in enumerate(attached_files):
-            resolved = await resolve_attached_file_data(file, idx=idx)
-            if resolved:
-                parts.append(resolved)
+        for file in attached_files:
+            parts.append({
+                "inline_data": {
+                    "data": file["data"],
+                    "mime_type": file["mimeType"]
+                }
+            })
 
         async def run_triage(ai):
             if isinstance(ai, OpenRouterWrapper):
@@ -764,11 +679,14 @@ async def generate_embedding(text: str) -> List[float]:
                 contents=text
             )
         except Exception as e:
-            print(f"[Embedding System] Fallback to embedding-001")
-            res = await ai.aio.models.embed_content(
-                model="models/embedding-001",
-                contents=text
-            )
+            if "NOT_FOUND" in str(e) or "404" in str(e):
+                print("[Embedding System] Fallback to embedding-001")
+                res = await ai.aio.models.embed_content(
+                    model="models/embedding-001",
+                    contents=text
+                )
+            else:
+                raise e
 
         # Extract values
         if res.embeddings and len(res.embeddings) > 0:
@@ -854,10 +772,13 @@ async def run_tribunal(
         })
         try:
             assimilation_parts = []
-            for idx, file in enumerate(attached_files):
-                resolved = await resolve_attached_file_data(file, on_step_update, idx)
-                if resolved:
-                    assimilation_parts.append(resolved)
+            for file in attached_files:
+                assimilation_parts.append({
+                    "inline_data": {
+                        "data": file["data"],
+                        "mime_type": file["mimeType"]
+                    }
+                })
             assimilation_parts.append({
                 "text": (
                     f"Lee estos documentos o imágenes médicas. El usuario quiere investigar sobre: \"{topic}\".\n"
@@ -938,10 +859,13 @@ async def run_tribunal(
     try:
         investigator_parts = []
         if attached_files:
-            for idx, file in enumerate(attached_files):
-                resolved = await resolve_attached_file_data(file, on_step_update, idx)
-                if resolved:
-                    investigator_parts.append(resolved)
+            for file in attached_files:
+                investigator_parts.append({
+                    "inline_data": {
+                        "data": file["data"],
+                        "mime_type": file["mimeType"]
+                    }
+                })
 
         literature_context = await gather_literature_context(topic, on_step_update, "tribunal", attached_files)
 
@@ -975,7 +899,6 @@ async def run_tribunal(
                 "=== INSTRUCCIÓN DE SERENDIPIA ===\nUtiliza activamente esta información para cruzar conceptos. Si se te proporciona un CASO ALEATORIO, es tu obligación científica buscar conexiones transversales, reposicionamiento de fármacos o mecanismos compartidos.\n"
             )
 
-        prompt_text = inject_video_scanning_protocol(prompt_text, attached_files)
         prompt_text += f"{literature_context}\n\nResponde en ESPAÑOL en formato JSON estructurado, rellenando todos los nodos de razonamiento para cada hipótesis."
         investigator_parts.append({"text": prompt_text})
 
@@ -1061,10 +984,13 @@ async def run_tribunal(
     try:
         critic_parts = []
         if attached_files:
-            for idx, file in enumerate(attached_files):
-                resolved = await resolve_attached_file_data(file, on_step_update, idx)
-                if resolved:
-                    critic_parts.append(resolved)
+            for file in attached_files:
+                critic_parts.append({
+                    "inline_data": {
+                        "data": file["data"],
+                        "mime_type": file["mimeType"]
+                    }
+                })
 
         critic_prompt = (
             "Eres un Crítico Clínico Élite (El Tribunal de Isomorfismo), implacable, escéptico y experto en fisiología humana, farmacología y toxicología.\n"
@@ -1089,7 +1015,6 @@ async def run_tribunal(
         if attached_files:
             critic_prompt += "También, asigna un 'documentFidelityScore' (0-100) que indique qué tan fiel es la hipótesis a la evidencia de los documentos.\n"
         
-        critic_prompt = inject_video_scanning_protocol(critic_prompt, attached_files)
         critic_prompt += "Finalmente, escribe un resumen final del tribunal.\nResponde en ESPAÑOL en formato JSON estructurado."
         critic_parts.append({"text": critic_prompt})
 
@@ -1188,13 +1113,14 @@ async def run_clinical_analysis(
 
     try:
         parts = []
-        resolved_media_parts = []
         if attached_files:
-            for idx, file in enumerate(attached_files):
-                resolved = await resolve_attached_file_data(file, on_step_update, idx)
-                if resolved:
-                    parts.append(resolved)
-                    resolved_media_parts.append(resolved)
+            for file in attached_files:
+                parts.append({
+                    "inline_data": {
+                        "data": file["data"],
+                        "mime_type": file["mimeType"]
+                    }
+                })
 
         literature_context = await gather_literature_context(topic, on_step_update, "clin", attached_files)
 
@@ -1221,7 +1147,7 @@ async def run_clinical_analysis(
             if triage.get("level") == "ROJO":
                 triage_info = (
                     f"\n\n🚨 ALARMA DE TRIAJE ACTIVADA (CÓDIGO ROJO): El Agente de Triaje ha detectado riesgo inminente: {triage.get('justification')}.\n"
-                    "Sin embargo, MANTÉN LA MÁXIMA OBJETIVIDAD CIENTÍFICA. Si al analizar rigurosamente las imágenes determinas con certeza que NO hay evidencia de daño letal, obstrucción o patología, TIENES LA OBLIGACIÓN ABSOLUTA de reportar 'Sana Normalidad' o 'Variante benigna'. No generes falsos positivos solo por esta alarma."
+                    "TIENES ESTRICTAMENTE PROHIBIDO USAR EL MODO GUILLOTINA O EL FILTRO DE NORMALIDAD. Enfócate exclusivamente en localizar la obstrucción anatómica, tensión mecánica o daño letal. NO diagnostiques 'variantes normales' frente a esta emergencia."
                 )
             else:
                 triage_info = (
@@ -1250,7 +1176,6 @@ async def run_clinical_analysis(
         if attached_files and len(attached_files) > 0:
             prompt_text += (
                 "\n=== DOCUMENTOS E IMÁGENES ADJUNTAS ===\nAnaliza los archivos adjuntos.\n"
-                "REGLA CRÍTICA DE VIDEOS / CINE-LOOPS: Si se adjuntan videos o cine-loops (ultrasonido dinámico, barridos de resonancia magnética o tomografía), analiza con rigurosidad la secuencia temporal de fotogramas para evaluar la cinética de flujo, vascularidad, y comportamiento mecánico/dinámico de la anomalía.\n"
                 "REGLA CRÍTICA (CONTRADICCIÓN Y JERARQUÍA DE EVIDENCIA): Compara el texto explícito (prompt del usuario o OCR) con los hallazgos visuales puros de las imágenes. Si existe una CONTRADICCIÓN CLARA entre lo que dice el texto (ej. \"Neurocisticercosis\") y lo que muestran las imágenes (ej. patrón clásico de \"Encefalitis Herpética\" en lóbulo temporal), DEBES DETENER TU ANÁLISIS DE ANCLAJE y declarar explícitamente una \"CONTRADICCIÓN CLÍNICO-RADIOLÓGICA\" al inicio de tu reporte. NO asumas ciegamente que la imagen es lo que dice el texto si la morfología es opuesta. Señala el error en los archivos al usuario.\n\n"
                 "PASO 1 (Extracción de Datos/OCR e Historial): Lee meticulosamente todo el texto en las imágenes o documentos. Extrae antecedentes, laboratorios previos, diagnósticos y procedimientos. Coloca esto en 'extractedClinicalText'. REGLA DE NO ALUCINACIÓN: Si un dato no está en los documentos, no lo inventes. Pon \"Desconocido\".\n"
                 "PASO 2 (Matriz de Signos Radiológicos/Endoscópicos): Busca signos clave en las imágenes. Identifica signos clásicos/epónimos en 'radiologicalSigns'.\n"
@@ -1282,7 +1207,6 @@ async def run_clinical_analysis(
         if past_context:
             prompt_text += f"\n=== BASE DE CONOCIMIENTO (HIVE-MIND) ===\nAquí están los aprendizajes pasados:\n{past_context}\n"
 
-        prompt_text = inject_video_scanning_protocol(prompt_text, attached_files)
         prompt_text += f"{literature_context}\n\nResponde en ESPAÑOL en formato JSON estricto."
         parts.append({"text": prompt_text})
 
@@ -1516,7 +1440,15 @@ async def run_clinical_analysis(
                 "timestamp": int(asyncio.get_event_loop().time() * 1000)
             })
             try:
-                debate_parts = list(resolved_media_parts)
+                debate_parts = []
+                if attached_files:
+                    for file in attached_files:
+                        debate_parts.append({
+                            "inline_data": {
+                                "data": file["data"],
+                                "mime_type": file["mimeType"]
+                            }
+                        })
 
                 debate_prompt = (
                     "Eres el 'Red Team Médico' (Junta Médica Antagonista y Escéptica de Rango Élite).\n"
@@ -1872,10 +1804,13 @@ async def run_epidemiology_analysis(
     try:
         parts = []
         if attached_files:
-            for idx, file in enumerate(attached_files):
-                resolved = await resolve_attached_file_data(file, on_step_update, idx)
-                if resolved:
-                    parts.append(resolved)
+            for file in attached_files:
+                parts.append({
+                    "inline_data": {
+                        "data": file["data"],
+                        "mime_type": file["mimeType"]
+                    }
+                })
 
         literature_context = await gather_literature_context(topic, on_step_update, "epi", attached_files)
 
@@ -1905,7 +1840,6 @@ async def run_epidemiology_analysis(
             "9. Resumen (summary)\n\n"
             "Responde en ESPAÑOL en formato JSON estricto."
         )
-        prompt_text = inject_video_scanning_protocol(prompt_text, attached_files)
         parts.append({"text": prompt_text})
 
         async def run_epi(ai):
@@ -2171,10 +2105,13 @@ async def run_immunology_analysis(
     try:
         parts = []
         if attached_files:
-            for idx, file in enumerate(attached_files):
-                resolved = await resolve_attached_file_data(file, on_step_update, idx)
-                if resolved:
-                    parts.append(resolved)
+            for file in attached_files:
+                parts.append({
+                    "inline_data": {
+                        "data": file["data"],
+                        "mime_type": file["mimeType"]
+                    }
+                })
 
         literature_context = await gather_literature_context(topic, on_step_update, "imm", attached_files)
 
@@ -2199,7 +2136,6 @@ async def run_immunology_analysis(
             "6. Resumen (summary)\n\n"
             "Responde en ESPAÑOL en formato JSON estricto."
         )
-        prompt_text = inject_video_scanning_protocol(prompt_text, attached_files)
         parts.append({"text": prompt_text})
 
         async def run_imm(ai):
@@ -2429,10 +2365,13 @@ async def continue_debate(
             })
             has_document_context = True
         else:
-            for idx, file in enumerate(attached_files):
-                resolved = await resolve_attached_file_data(file, idx=idx)
-                if resolved:
-                    chat_parts.append(resolved)
+            for file in attached_files:
+                chat_parts.append({
+                    "inline_data": {
+                        "data": file["data"],
+                        "mime_type": file["mimeType"]
+                    }
+                })
             has_document_context = True
 
     mode = session.get("mode", "investigator")
@@ -2547,7 +2486,6 @@ async def continue_debate(
             "Responde en ESPAÑOL en formato JSON."
         )
 
-    prompt_text = inject_video_scanning_protocol(prompt_text, attached_files)
     chat_parts.append({"text": prompt_text})
 
     async def run_chat(ai):
@@ -2655,10 +2593,13 @@ async def expand_hypothesis(
             })
             has_document_context = True
         else:
-            for idx, file in enumerate(attached_files):
-                resolved = await resolve_attached_file_data(file, idx=idx)
-                if resolved:
-                    parts.append(resolved)
+            for file in attached_files:
+                parts.append({
+                    "inline_data": {
+                        "data": file["data"],
+                        "mime_type": file["mimeType"]
+                    }
+                })
             has_document_context = True
 
     final_text = ""
