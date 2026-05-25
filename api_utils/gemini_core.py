@@ -266,6 +266,26 @@ async def gather_literature_context(
     attached_files: Optional[List[Dict[str, Any]]] = None
 ) -> str:
     from .literature import search_europe_pmc, get_full_text_sections
+    
+    # RAG DETOX: If it's a pure video scan and the topic is a generic conversational prompt,
+    # we bypass literature search to prevent anchoring bias.
+    has_video = False
+    if attached_files:
+        for file in attached_files:
+            mime = file.get("mimeType", "") or file.get("type", "") or file.get("mime_type", "") or ""
+            url = file.get("videoUrl") or file.get("video_url") or ""
+            if mime.startswith("video/") or url:
+                has_video = True
+                break
+
+    if has_video:
+        topic_lower = topic.lower()
+        clinical_keywords = ["pancreas", "pancreatico", "cancer", "tumor", "masa", "mass", "dolor", "pain", "ictericia", "jaundice", "obstru", "biliar", "coledoco", "duodeno", "enostosis", "escler", "quiste", "cyst", "bosniak"]
+        is_generic_prompt = not any(kw in topic_lower for kw in clinical_keywords)
+        if is_generic_prompt:
+            print("[RAG Detox] Generic video scan detected. Bypassing literature search to prevent anchoring bias.")
+            return ""
+
     try:
         on_step_update({
             "id": f"{mode_prefix}-research-plan-{int(asyncio.get_event_loop().time() * 1000)}",
