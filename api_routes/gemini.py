@@ -62,11 +62,11 @@ async def invoke_gemini(
                 yield " "
                 await asyncio.sleep(2)
             res = task.result()
-            yield json.dumps(res, ensure_ascii=False)
+            yield json.dumps(res)
         except HTTPException as he:
-            yield json.dumps({"success": False, "error": "HTTPException", "detail": he.detail}, ensure_ascii=False)
+            yield json.dumps({"success": False, "error": "HTTPException", "detail": he.detail})
         except Exception as e:
-            yield json.dumps({"success": False, "error": "Exception", "detail": str(e)}, ensure_ascii=False)
+            yield json.dumps({"success": False, "error": "Exception", "detail": str(e)})
 
     return StreamingResponse(event_generator(), media_type="application/json")
 
